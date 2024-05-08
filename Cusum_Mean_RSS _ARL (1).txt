@@ -1,0 +1,449 @@
+
+##### R Codes for Monte Carlo Simulation####
+rm(list=ls())  
+#############################  warnings()
+library(bbmle)
+library(Matrix)
+library(MASS)
+#library(numDeriv)
+library(Matrix)
+#########################
+IC_MWD=function(sg,FAR,n,tau,tau_2, ynf) {
+   
+  #  simu= 15;rpt=10;sg=100;FAR=0.0027;n=50;shftl=0.1;shft1=0.02;shftp=0;   tau=8;tau_2=20;ynf=11 ;
+  lamd=1.5;phi1=0.01;paii=0.2;gam=0.3;del=.2; 
+  
+  
+  Bays_lam<-     Bays_phi<-    Bays_pai<- Bays_R_se <-  c() 
+  Bays_R_se <- a_se <- Bays_Ro_se  <-  c()   ;   
+ tau_1  <-  tau
+  
+  
+  for(k in 1:sg)
+  { 
+    
+    CDF <- function(t, phi, gamma, delta) {
+      return(1 - exp(-phi * t^gamma * exp(delta * t)))
+    }
+    
+    # Define the quantile function for the distribution
+    quantile_function <- function(p, phi, gamma, delta) {
+      f <- function(t) CDF(t, phi, gamma, delta) - p
+      root <- uniroot(f, c(0, 1000))  # Adjust the range according to your distribution
+      return(root$root)
+    }
+    
+    vectorized_q <- Vectorize(quantile_function, vectorize.args = c("p",  "phi", "gamma", "delta"))
+    T <- round(vectorized_q( runif(n) , phi1, gam, del),5)  
+    
+    #   tau=111;tau_2=244;ynf=114 ;
+    
+    yn1 <- T[T<= tau]
+    yn2 <-   ifelse((tau + (1 / lamd) * (T[T> tau] - tau))<=tau_2, (tau + (1 / lamd) * (T[T> tau] - tau)), tau_2)   
+    yc <-    max(yn2)
+    n1 <- length(yn1)
+    n2 <- length(yn2)
+    
+    neg_log_likelihood <- function(p) {
+      
+      mle_phi12d<-   tau +p[1] *(yn2-tau )  
+      mle_phi12dc<-  tau +p[1] *(yc-tau )  
+      epdphi<-   exp(del*mle_phi12d  )  
+      epdphic<-  exp(del*mle_phi12dc);
+      gdphi<-   (gam+del*mle_phi12d  )  ;
+      gdphic<-   (gam+del*mle_phi12dc  )  ;
+      
+      f <- numeric()
+      
+      f[1] <- n2*log(p[2])+ (n2-n1)*log(p[1]*p[3])
+      f[2] <- -p[2]*sum((yn1)^(gam)*exp(del*yn1))
+      f[3] <- -(n-n2)*p[2]*p[3]*(mle_phi12dc)^(gam)*epdphic
+      f[4] <- sum(log(gdphi) +del* mle_phi12d -p[2]*p[3]* (mle_phi12d)^(
+        gam)*epdphi +(gam-1)* log( mle_phi12d))
+      
+      return(-sum(f))  
+    }
+    
+    mle_result <- nlminb(c(lamd, phi1, paii), neg_log_likelihood, lower = 0, upper = Inf)
+    temp <- mle_result$convergence
+    
+    if (temp == 0) {
+      temp_lamd <- mle_result$par[1]
+      temp_phi1 <- mle_result$par[2]
+      temp_paii <- mle_result$par[3]
+    }else{
+      temp_lamd <- lamd
+      temp_phi1 <- phi1
+      temp_paii <- paii
+    }
+    # Parameters for the distribution and censoring  k=3
+    temp=1
+    
+    mle_lamd2 <- temp_lamd
+    mle_phi12 <- temp_phi1
+    mle_paii2 <- temp_paii
+     
+    gr_mle_phi12d<-   tau +mle_lamd2 *(ynf-tau )  
+    gr_epdphi<-   exp(del*gr_mle_phi12d  )  
+    gr_epdphim<-  exp(del*gr_mle_phi12d-mle_phi12*mle_paii2*(gr_mle_phi12d)^(gam)*gr_epdphi);
+    #gr_gdphi<-   (gam+del*gr_mle_phi12d  )  ;
+    ML_R <-   ifelse(ynf <= tau ,(mle_phi12*(ynf)^(gam-1)*(gam+del*ynf)*exp(-mle_phi12*(ynf)^(gam)*exp(del*ynf)+del*ynf))/ exp(-mle_phi12*(ynf)^(gam)*exp(del*ynf)), 
+                     (mle_phi12*(gr_mle_phi12d)^(gam-1)*(gam+del*gr_mle_phi12d)*exp(-mle_phi12*(gr_mle_phi12d)^(gam)*exp(del*gr_mle_phi12d)+del*gr_mle_phi12d))/exp(-mle_paii2*mle_phi12*(gr_mle_phi12d)^(gam)*gr_epdphi))
+    
+    
+    
+    ###############HYPER PARAMETRS###################n=30
+    
+    a1    <-  12   
+    a2    <-  14  
+    b1    <-  4
+    b2    <-  9
+    
+    
+    
+    log_posterior <- function(params) {
+      # Extract parameters
+      lmmd <- params[1]
+      phii <- params[2]
+      paii <- params[3]
+       
+      # Calculate intermediate values
+      philmd<- tau+lmmd *(yn2-tau)
+      gdphi<- (gam+del*philmd);
+      epdphi<- exp(del*philmd) 
+      philmdc<- tau+lmmd *(yc-tau) 
+      epdphic<- exp(del*philmdc)
+      
+      
+      post <-  (n2-n1-1)*log(lmmd)+(n2+a1-1)*log(phii)+(n2-n1+a2-1)*log(paii)+sum((gam-1)*log(philmd)+log(gdphi) )- 
+        phii*sum((yn1)^(gam)* exp(del*yn1) )+ sum(del*philmd-phii*paii*(philmd)^(gam)*epdphi)-
+        (n-n2)*phii*paii*(philmdc)^(gam)*epdphic-phii*b1-b2*paii
+      
+      return(post)
+    } 
+    
+    # Function to propose new parameters using a normal distribution
+    proposal <- function(current_params, proposal_sd) {
+      
+      proposed_params <- rnorm(3, mean = current_params, sd = proposal_sd)
+      # Ensure alpha and beta are positive (MWD parameters must be positive)
+      proposed_params[proposed_params <= 0] <- current_params[proposed_params <= 0]
+      return(proposed_params)
+    }
+    
+    # Metropolis-Hastings algorithm
+    metropolis_hastings <- function(n_iter, initial_values, proposal_sd) {
+      # Initialize matrix to store sampled parameters
+      samples <- matrix(NA, n_iter, 3)
+      samples[1, ] <- initial_values
+      
+      for (i in 2:n_iter) {
+        current_params <- samples[i - 1, ]
+        proposed_params <- proposal(current_params, proposal_sd)
+        
+        # Compute log posterior for current and proposed parameters
+        log_posterior_current <- log_posterior(current_params)
+        log_posterior_proposed <- log_posterior(proposed_params)
+        
+        # Calculate acceptance ratio
+        acceptance_ratio <- exp(log_posterior_proposed - log_posterior_current)
+        
+        # Accept or reject the proposed parameters
+        if (runif(1) < acceptance_ratio) {
+          samples[i, ] <- proposed_params
+        } else {
+          samples[i, ] <- current_params
+        }
+      }
+      
+      return(samples)
+    }
+    
+    # Set the number of iterations for Metropolis-Hastings
+    Bu <- 700;nn <- 500; n_iter <- Bu+nn ;
+    
+    # Standard deviation for proposal distribution
+    proposal_sd <- 0.001
+    # Run Metropolis-Hastings algorithm
+    initial_v <- c(mle_lamd2 ,mle_phi12, mle_paii2)
+    ress <- metropolis_hastings(n_iter, initial_v, proposal_sd)
+    mh.draws  <- ress[(Bu + 1):n_iter, ]  
+    
+       ###############bayesian#estimators  GELF###################n=30
+    k1 <- c(-.5,.5) ; ro<-  0.5  
+    ###############bayesian#estimators  GELF###################n=30
+    Bays_lamd2 <- mh.draws[,1]
+    Bays_phi12 <- mh.draws[,2]
+    Bays_paii2 <- mh.draws[,3]
+    
+    Bgr_mle_phi12d<-   tau +Bays_lamd2 *(ynf-tau )  
+    Bgr_epdphi<-   exp(del*Bgr_mle_phi12d  )  
+    
+    
+    if(ynf <= tau ){     # accept proposed moved.
+      Bays_R <-   (Bays_phi12*(ynf)^(gam-1)*(gam+del*ynf)*exp(-Bays_phi12*(ynf)^(gam)*exp(del*ynf)+del*ynf))/ exp(-Bays_phi12*(ynf)^(gam)*exp(del*ynf))
+    }else{# reject proposed move, stay put.
+       Bays_R <-  (Bays_phi12*(Bgr_mle_phi12d)^(gam-1)*(gam+del*Bgr_mle_phi12d)*exp(-Bays_phi12*(Bgr_mle_phi12d)^(gam)*exp(del*Bgr_mle_phi12d)+del*Bgr_mle_phi12d))/exp(-Bays_paii2*Bays_phi12*(Bgr_mle_phi12d)^(gam)*Bgr_epdphi) 
+     }
+     
+    ##############################################    mean(Bays_R)
+    
+    Bays_lam[k]<-   -log(ro*exp(-k1[1]*mle_lamd2)+(1-ro)*sum(exp(-k1[1]*Bays_lamd2))/nn )/k1[1]  
+    Bays_phi[k]<-   -log(ro*exp(-k1[1]*mle_phi12)+(1-ro)*sum(exp(-k1[1]*Bays_phi12))/nn )/k1[1]  
+    Bays_pai[k]<-   -log(ro*exp(-k1[1]*mle_paii2)+(1-ro)*sum(exp(-k1[1]*Bays_paii2))/nn )/k1[1]  
+    
+    Bays_R_se1<-   -log(ro*exp(-k1[1]*ML_R)+(1-ro)*sum(exp(-k1[1]*Bays_R))/nn )/k1[1]  
+    Bays_R_se[k]<-  Bays_R_se1
+    
+    
+    print(k)
+    
+    
+    
+  }
+  lower_idx <-  (FAR / 2)
+  upper_idx <- (1 - FAR / 2)
+  lcl_ML_R <-  quantile( Bays_R_se,  probs = lower_idx)
+  ucl_ML_R <-  quantile(Bays_R_se,  probs = upper_idx)
+  mle_lamd   <- mean(Bays_lam)
+  mle_phi1  <- mean(Bays_phi)
+  mle_paii  <- mean(Bays_pai)
+  
+  return(c(mle_lamd , mle_phi1, mle_paii, lcl_ML_R, ucl_ML_R))    
+  
+}
+
+# Call the function and store results in a variable    warnings() 
+
+results <- IC_MWD(sg = 100, FAR = 0.0027, n = 50, tau = 11, tau_2 = 24, ynf = 15)
+cat("\t","mle_lamd" , "mle_phi1", "mle_paii", "lcl_ML_R", "ucl_ML_R","\n") 
+cat("\t",results,"\n")
+  
+ 
+#    simu= 15;rpt=10;sg=100;FAR=0.0027;n=50;shftl=0.1;shft1=0.1;shftp=0 ; tau=6;tau_2=14;ynf=4 ;         
+
+
+
+
+
+
+
+#ooc#ooc#ooc#ooc#ooc#ooc#ooc#ooc#ooc#ooc#ooc#ooc#ooc#ooc#ooc#ooc#ooc#ooc#ooc
+
+
+##### R Codes for Monte Carlo Simulation####
+rm(list=ls())  
+#############################  warnings()
+library(bbmle)
+library(Matrix)
+library(MASS)
+#library(numDeriv)
+library(Matrix)
+#########################
+
+OOC_MWD=function(simu,rpt,n,tau,tau_2,shf_lmd,shf_ph1,shf_pi,ynf,lcl_ML_R,ucl_ML_R) {
+  lam=1.5;phi11=0.01;pai=0.2;gam=0.3;del=.2; 
+   lamd = lam + shf_lmd; phi1 = phi11+shf_ph1; paii = pai +shf_pi
+  a_ML <- ML_Ro  <-  c()   ;  
+ 
+  for(ii in 1:rpt){
+    for(o in 1:simu){ 
+       
+      CDF <- function(t, phi, gamma, delta) {
+        return(1 - exp(-phi * t^gamma * exp(delta * t)))
+      }
+      
+      # Define the quantile function for the distribution
+      quantile_function <- function(p, phi, gamma, delta) {
+        f <- function(t) CDF(t, phi, gamma, delta) - p
+        root <- uniroot(f, c(0, 1000))  # Adjust the range according to your distribution
+        return(root$root)
+      }
+      
+      vectorized_q <- Vectorize(quantile_function, vectorize.args = c("p",  "phi", "gamma", "delta"))
+      T <- round(vectorized_q( runif(n) , phi1, gam, del),5)  
+      
+      #   tau=111;tau_2=244;ynf=114 ;
+      
+      yn1 <- T[T<= tau]
+      yn2 <-   ifelse((tau + (1 / lamd) * (T[T> tau] - tau))<=tau_2, (tau + (1 / lamd) * (T[T> tau] - tau)), tau_2)   
+      yc <-    max(yn2)
+      n1 <- length(yn1)
+      n2 <- length(yn2)
+      
+      neg_log_likelihood <- function(p) {
+        
+        mle_phi12d<-   tau +p[1] *(yn2-tau )  
+        mle_phi12dc<-  tau +p[1] *(yc-tau )  
+        epdphi<-   exp(del*mle_phi12d  )  
+        epdphic<-  exp(del*mle_phi12dc);
+        gdphi<-   (gam+del*mle_phi12d  )  ;
+        gdphic<-   (gam+del*mle_phi12dc  )  ;
+        
+        f <- numeric()
+        
+        f[1] <- n2*log(p[2])+ (n2-n1)*log(p[1]*p[3])
+        f[2] <- -p[2]*sum((yn1)^(gam)*exp(del*yn1))
+        f[3] <- -(n-n2)*p[2]*p[3]*(mle_phi12dc)^(gam)*epdphic
+        f[4] <- sum(log(gdphi) +del* mle_phi12d -p[2]*p[3]* (mle_phi12d)^(
+          gam)*epdphi +(gam-1)* log( mle_phi12d))
+        
+        return(-sum(f))  
+      }
+      
+      mle_result <- nlminb(c(lamd, phi1, paii), neg_log_likelihood, lower = 0, upper = Inf)
+      temp <- mle_result$convergence
+      
+      if (temp == 0) {
+        temp_lamd <- mle_result$par[1]
+        temp_phi1 <- mle_result$par[2]
+        temp_paii <- mle_result$par[3]
+      }else{
+        temp_lamd <- lamd
+        temp_phi1 <- phi1
+        temp_paii <- paii
+      }
+      # Parameters for the distribution and censoring  k=3
+      temp=1
+      
+      mle_lamd2 <- temp_lamd
+      mle_phi12 <- temp_phi1
+      mle_paii2 <- temp_paii
+      
+      gr_mle_phi12d<-   tau +mle_lamd2 *(ynf-tau )  
+      gr_epdphi<-   exp(del*gr_mle_phi12d  )  
+      gr_epdphim<-  exp(del*gr_mle_phi12d-mle_phi12*mle_paii2*(gr_mle_phi12d)^(gam)*gr_epdphi);
+      #gr_gdphi<-   (gam+del*gr_mle_phi12d  )  ;
+      ML_R <-   ifelse(ynf <= tau ,(mle_phi12*(ynf)^(gam-1)*(gam+del*ynf)*exp(-mle_phi12*(ynf)^(gam)*exp(del*ynf)+del*ynf))/ exp(-mle_phi12*(ynf)^(gam)*exp(del*ynf)), 
+                       (mle_phi12*(gr_mle_phi12d)^(gam-1)*(gam+del*gr_mle_phi12d)*exp(-mle_phi12*(gr_mle_phi12d)^(gam)*exp(del*gr_mle_phi12d)+del*gr_mle_phi12d))/exp(-mle_paii2*mle_phi12*(gr_mle_phi12d)^(gam)*gr_epdphi))
+      
+      
+      
+      ###############HYPER PARAMETRS###################n=30
+      
+      a1    <-  12   
+      a2    <-  14  
+      b1    <-  4
+      b2    <-  9
+      ###############full conditionals##########
+
+      
+      log_posterior <- function(params) {
+        # Extract parameters
+        lmmd <- params[1]
+        phii <- params[2]
+        paii <- params[3]
+        
+        # Calculate intermediate values
+        philmd<- tau+lmmd *(yn2-tau)
+        gdphi<- (gam+del*philmd);
+        epdphi<- exp(del*philmd) 
+        philmdc<- tau+lmmd *(yc-tau) 
+        epdphic<- exp(del*philmdc)
+        
+        
+        post <-  (n2-n1-1)*log(lmmd)+(n2+a1-1)*log(phii)+(n2-n1+a2-1)*log(paii)+sum((gam-1)*log(philmd)+log(gdphi) )- 
+          phii*sum((yn1)^(gam)* exp(del*yn1) )+ sum(del*philmd-phii*paii*(philmd)^(gam)*epdphi)-
+          (n-n2)*phii*paii*(philmdc)^(gam)*epdphic-phii*b1-b2*paii
+        
+        return(post)
+      } 
+      
+      # Function to propose new parameters using a normal distribution
+      proposal <- function(current_params, proposal_sd) {
+        
+        proposed_params <- rnorm(3, mean = current_params, sd = proposal_sd)
+        # Ensure alpha and beta are positive (MWD parameters must be positive)
+        proposed_params[proposed_params <= 0] <- current_params[proposed_params <= 0]
+        return(proposed_params)
+      }
+      
+      # Metropolis-Hastings algorithm
+      metropolis_hastings <- function(n_iter, initial_values, proposal_sd) {
+        # Initialize matrix to store sampled parameters
+        samples <- matrix(NA, n_iter, 3)
+        samples[1, ] <- initial_values
+        
+        for (i in 2:n_iter) {
+          current_params <- samples[i - 1, ]
+          proposed_params <- proposal(current_params, proposal_sd)
+          
+          # Compute log posterior for current and proposed parameters
+          log_posterior_current <- log_posterior(current_params)
+          log_posterior_proposed <- log_posterior(proposed_params)
+          
+          # Calculate acceptance ratio
+          acceptance_ratio <- exp(log_posterior_proposed - log_posterior_current)
+          
+          # Accept or reject the proposed parameters
+          if (runif(1) < acceptance_ratio) {
+            samples[i, ] <- proposed_params
+          } else {
+            samples[i, ] <- current_params
+          }
+        }
+        
+        return(samples)
+      }
+      
+      # Set the number of iterations for Metropolis-Hastings
+      Bu <- 700;nn <- 500; n_iter <- Bu+nn ;
+      
+      # Standard deviation for proposal distribution
+      proposal_sd <- 0.001
+      # Run Metropolis-Hastings algorithm
+      initial_v <- c(mle_lamd2 ,mle_phi12, mle_paii2)
+      ress <- metropolis_hastings(n_iter, initial_v, proposal_sd)
+      mh.draws  <- ress[(Bu + 1):n_iter, ]  
+      
+      ###############bayesian#estimators  GELF###################n=30
+      k1 <- c(-.5,.5) ; ro<-  0.5  
+      ###############bayesian#estimators  GELF###################n=30
+      Bays_lamd2 <- mh.draws[,1]
+      Bays_phi12 <- mh.draws[,2]
+      Bays_paii2 <- mh.draws[,3]
+      
+      Bgr_mle_phi12d<-   tau +Bays_lamd2 *(ynf-tau )  
+      Bgr_epdphi<-   exp(del*Bgr_mle_phi12d  )  
+      
+      
+      if(ynf <= tau ){     # accept proposed moved.
+        Bays_R <-   (Bays_phi12*(ynf)^(gam-1)*(gam+del*ynf)*exp(-Bays_phi12*(ynf)^(gam)*exp(del*ynf)+del*ynf))/ exp(-Bays_phi12*(ynf)^(gam)*exp(del*ynf))
+      }else{# reject proposed move, stay put.
+        Bays_R <-  (Bays_phi12*(Bgr_mle_phi12d)^(gam-1)*(gam+del*Bgr_mle_phi12d)*exp(-Bays_phi12*(Bgr_mle_phi12d)^(gam)*exp(del*Bgr_mle_phi12d)+del*Bgr_mle_phi12d))/exp(-Bays_paii2*Bays_phi12*(Bgr_mle_phi12d)^(gam)*Bgr_epdphi) 
+      }
+      
+       #############################################    mean(Bays_R)
+       
+      Bays_R_se1<-   -log(ro*exp(-k1[1]*ML_R)+(1-ro)*sum(exp(-k1[1]*Bays_R))/nn )/k1[1]  
+      ML_Ro[o]<-  Bays_R_se1
+      
+     
+      if (ML_Ro[o]>ucl_ML_R | ML_Ro[o]<lcl_ML_R){
+        a_ML[ii]=o;
+        print(cbind("a_ML",mean(a_ML),sd(a_ML),length(a_ML)))
+        break();
+      }
+      else {
+        a_ML[ii]=0;
+      }
+      
+    }
+  }
+  
+  return(c(mean(a_ML) , sd(a_ML)))  
+  
+}
+ 
+ 
+result_ooc <- OOC_MWD(simu= 1500,rpt=100,n=50,tau=11,tau_2=24,shf_lmd=0.00,shf_ph1=0.00,shf_pi=0,ynf=15,lcl_ML_R= 0    ,ucl_ML_R= 0.07361328      )
+#result_ooc <- OOC_MWD(simu= 150,rpt=100,n=50,tau=12,tau_2=28,shf_lmd=0.00,shf_ph1=0.00,shf_pi=0,ynf=5,lcl_ML_R= 0.02898076  ,ucl_ML_R= 0.9718756 )
+cat("\t","mean(a_ML)" , "sd(a_ML)","\n") 
+cat("\t",result_ooc,"\n")
+
+#    simu= 15;rpt=10;sg=100;FAR=0.0027;n=50;shftl=0.1;shft1=0.02;shftp=0  tau=111;tau_2=244;ynf=114 ;
+
+
+
+
+ 

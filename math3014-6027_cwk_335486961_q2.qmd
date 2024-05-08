@@ -1,0 +1,432 @@
+---
+title: "MATH6173 Coursework 2"
+author: "335486961"
+#date: \today
+format: html
+output: 
+  quarto::pdf_document:
+    latex_packages: [quarto, amsmath, amssymb, hyperref]
+    latex_engine: pdflatex
+    latex:
+      packages:
+        - amsmath
+        - amssymb
+        - graphicx
+        - hyperref
+    header-includes:
+      - \usepackage{times}
+      - \fvset{xlefmargin=2em,font=small,breaklines=true}
+    toc: true
+    number_sections: true
+    highlight: pygments
+    fig_width: 6
+    fig_height: 4
+    fig_caption: true
+    code_folding: show
+    code_numbering: true
+    citation_package: natbib
+    link-citations: true
+    toc_depth: 3
+    keep_tex: false
+---
+
+
+
+
+ 
+### Install and load required libraries
+ 
+```{r}
+#| output: false
+ rm(list=ls())
+ ##############################| echo: false
+
+if (!require("ibd")) install.packages("ibd")
+if (!require("FrF2")) install.packages("FrF2")
+##########################
+# Install and load required libraries
+library(emmeans) 
+library(ibd)
+ library(FrF2)
+library(knitr)
+library(dplyr)
+library(unrepx)
+
+```
+
+
+# Q.2 (a)
+The data set is reproduced as follows:
+```{r}
+  
+tyre1 <- data.frame(treatment = rep(factor(1:4), 3),
+                  block = rep(factor(1:3), rep(4, 3)),
+                  response = c(NA,9,5,9,21,NA,9,NA,15,8,NA,11)
+)# length(strength)
+knitr::kable(
+  tidyr::pivot_wider(tyre1, names_from = treatment, values_from = response),
+  col.names = c("Block", paste("Teatment", 1:4)),
+  caption = "Question NO. 2" 
+)
+
+
+```
+
+
+Here, the blocks have size  k = 3,2,3, reespectively which is smaller than the number of treatments (  t = 4  ). Hence, each block cannot contain an application of each treatment. This is an example of an incomplete block design. Graphical exploration of the data is a little more problematic in this example. As each treatment does not occur in each block, box plots given by the following figures are not as informative. 
+
+```{r}
+ 
+boxplot(response ~ block, data = tyre1)
+boxplot(response ~ treatment, data = tyre1)         
+
+             
+```
+
+The   form of various important matrices including the ***incidence matrix***, given by **N**, used through our analysis are provided below:
+
+```{r}
+ one <- rep(1, 2)
+X1 <- kronecker(diag(1, nrow = 4), one)
+X2 <- matrix(   #  t(X2)
+  c(0, 1, 0, 
+    0, 0, 1,
+    1, 0, 0,
+    0, 0, 1,
+    1, 0, 0,
+    0, 1, 0,
+    1, 0, 0,
+    0, 0, 1
+  ), nrow = 8, byrow = T
+)
+ 
+#incidence matrix
+N <- t(X2) %*% X1
+X1tX1 <- t(X1) %*% X1 # diagonal
+X2tX2 <- t(X2) %*% X2 # diagonal
+H1 <- X1 %*% solve(t(X1) %*% X1) %*% t(X1)
+ones <- H1 %*% rep(1, 8) # H1 f2s vector of 1s is also a vector of 1s
+A <- t(X2) %*% X2 - t(X2) %*% H1 %*% X2 # X2t(I - H1)X2
+qr(A)$rank # rank 3
+X2tH1 <- t(X2) %*% H1 # adjustment to y
+W <- cbind(ones, X1, X2) # overall model matrix
+qr(W)$rank # rank 7 (t+b - 1)
+print(N)             
+```
+
+
+
+For our question, we obtain the following **ANOVA Table to test the hypothesis of no treatment effect** as:
+```{r}
+
+bar.lm <- lm(response ~ block + treatment, data = tyre1)
+anova(bar.lm)
+# str(summary(bar.lm) )
+```
+
+We can estimate the contrasts between treatments using *emmeans* package as:
+
+```{r}
+tyre.s2 <- summary(bar.lm)$sigma         
+bar.emm <- emmeans::emmeans(bar.lm, ~ treatment)
+contrastv1.emmc <- function(levs)
+  data.frame('t1 v t2' = c(1, -1, 0, 0), 't1 v t3' = c(1,  0,-1, 0), 't1 v t4'= c(1, 0, 0, -1))
+emmeans::contrast(bar.emm)  
+ bar_crd.lm <- lm(response ~  treatment, data = tyre1)
+bar_crd.emm <- emmeans::emmeans(bar_crd.lm, ~ treatment)
+emmeans::contrast(bar_crd.emm)
+summary(bar_crd.lm) 
+
+
+             
+```
+Clearly, the null hypothesis of no treatment effect is rejected. The anova function also compares the block mean square to test the hypothesis of no Block effect. 
+
+
+# Q.2 (b) 
+Now we directly calculate the  **q**  from treatment and block sums, using the **incidence matrix**  and perform pairwise analysis as:
+
+```{r}
+summary(bar.lm) 
+trtsum <- aggregate(response ~  treatment, data = tyre1, FUN = sum)[, 2]
+blocksum <- aggregate( response ~ block, data = tyre1, FUN = sum)[, 2]
+q <- trtsum -blocksum  %*%  N/ 3
+ 
+C <- matrix(
+  c(1, -1, 0, 0,
+    1, 0, -1, 0,
+    1, 0, 0, -1,
+    0, 1, -1, 0,
+    0, 1, 0, -1,
+    0, 0, 1, -1),
+  ncol = 4, byrow = T
+)
+k  <- 3; lambda <- 2; t <- 4
+pe <- k * C %*% t(q) / (lambda * t) # point esf2ates
+se <- sqrt(2 * k * tyre.s2 / (lambda * t)) # st error (same for each contrast)
+t.ratio <- pe / se
+p.value <- 1 - ptukey(abs(t.ratio) * sqrt(2), 4, 5)
+data.frame(Pair = c('1v2','1v3','1v4','2v3','2v4','3v4'),
+           Esf2ate =pe, St.err = se, t.ratio = t.ratio,
+                        p.value = p.value, reject = p.value < 0.05)
+           tyre.emm <- emmeans::emmeans(bar.lm, ~ treatment)
+           pairs(tyre.emm)
+
+
+             
+```
+
+For this experiment, treatments   are significantly different at an experiment-wise type I error rate of 5%.
+
+# Q.2 (C)
+
+There were *t = 8* treatments, defined via the settings of 2 different factors, as given in following Table. In the R code above, we have used the function *FrF2* (from the package of the same name) to generate all  
+  combinations of the two levels of these  factors.
+
+```{r}
+ 
+           desilylation <- FrF2::FrF2(nruns = 8, nfactors = 2, randomize = F,
+                                      factor.names = list(f1 = c("Low","High"), f2 = c("Low","High")))
+           yield <- c(9,5,9,21,9,15,8,11)
+           desilylation <- data.frame(desilylation, yield = yield)
+           rownames(desilylation) <- paste("Trt", 1:8)
+           knitr::kable(desilylation, 
+                        col.names = c("Factor1", "Factor1", "Blocks"," Response"),
+                        caption = "Desilylation experiment: 8 treatments defined 
+             by settings of 2 factors, with response.")           
+             
+      
+             
+```
+
+If we fit **unit-treatment model**   and compute the ANOVA table, we notice a particular issue with this design.
+ 
+
+```{r}     
+           desilylation <- data.frame(desilylation, trt = factor(1:8))
+           desilylation.lm <- lm(yield ~ trt, data = desilylation)
+           anova(desilylation.lm)
+```    
+           
+           
+           All available degrees of freedom are being used to estimate parameters in the mean    and the treatment effects. There are *no degrees of freedom left to estimate  variance*. This is due to a lack of treatment replication.
+                  
+```{r}           
+           desilylation.emm <- emmeans::emmeans(desilylation.lm, ~ trt)
+           reagent_me.emmc <- function(levs, ...) data.frame('reagent m.e.' = rep(c(-1, 1), rep(4, 2)) / 4)
+           emmeans::contrast(desilylation.emm, 'reagent_me')
+      
+```
+This contrast compares the average treatment effect from the   treatments which have reagent set to its low level (1 equiv.) to the average effect from the  treatments which have reagent set to its high level. This is a “fair” comparison, as both of these sets of treatments have each of the combinations of the both factors occuring equally often.
+
+
+
+We can also **calculate main effect** estimates for these factors by defining appropriate contrasts in the treatments.
+
+```{r}
+     
+           
+           contrast.mat <- FrF2::FrF2(nruns = 8, nfactors = 2, randomize = F, 
+                                      factor.names = c("f1", "f2"                                       ))
+           fac.contrasts.emmc <- function(levs, ...) 
+             dplyr::mutate_all(data.frame(contrast.mat), function(x) scale(as.numeric(as.character(x)), scale = 4))
+           main_effect_contrasts <- fac.contrasts.emmc()
+           rownames(main_effect_contrasts) <- paste("Trt", 1:8)
+           knitr::kable(main_effect_contrasts, caption = 'Desilylation experiment: main effect contrast coefficients', col.names = c("Factor1", "Factor2", "Block"))        
+           
+      
+             
+```
+
+
+
+Estimates can be obtained by applying these coefficients to the observed treatment means as:
+```{r}     
+           t(as.matrix(main_effect_contrasts)) %*% yield
+        
+           
+           
+           emmeans::contrast(desilylation.emm, 'fac.contrasts')
+           
+      
+             
+```
+
+
+ Following Figure  presents the   **main effect plots** for our data 
+```{r}     
+           ## calculate the means
+           f1_bar <- aggregate(yield ~ f1, data = desilylation, FUN = mean)
+           f2_bar <- aggregate(yield ~ f2, data = desilylation, FUN = mean)
+            
+           ## convert factors to numeric
+           fac_to_num <- function(x) as.numeric(as.character(x))
+           f1_bar$yield <- fac_to_num(f1_bar$yield)
+           f2_bar$yield <- fac_to_num(f2_bar$yield)
+           f1_bar$f1 <- fac_to_num(f1_bar$f1)
+           f2_bar$f2 <- fac_to_num(f2_bar$f2)
+            
+           ## main effect plots
+           plotmin <- min(f1_bar$yield, f2_bar$yield)
+           plotmax <- max(f1_bar$yield, f2_bar$yield)
+           par(cex = 2)
+
+           
+           
+```
+
+
+
+
+```{r}
+ 
+           plot(f1_bar$yield, type = "b", col="green", xlim =c(.95,2.02), ylim = c(plotmin, plotmax),lty=3,lwd = 2,pch = 21,  bg = "maroon4",    cex = 1.3 )
+           plot(f2_bar$yield, type = "b", col="red",xlim =c(.95,2.02), ylim = c(plotmin, plotmax),lty=3,lwd = 2,pch = 21,  bg = "blue",    cex = 1.3)
+ 
+```
+
+
+
+For our data the following  **interaction contrast* seems quite small, although of course without an estimate of the standard error we are still lacking a formal method to judge this.
+```{r}
+           sol_reg_int.emmc <- function(levels, ...) 
+             data.frame('reagent x solvent' = .125 * c(rep(1, 2), rep(-1, 4), rep(1, 2)))
+           emmeans::contrast(desilylation.emm, 'sol_reg_int')
+```           
+   To calculate the *contrast coefficients* we use the elementwise, or *Hadamard, product* as:
+```{r}
+           fac.contrasts.int.emmc <- function(levs, ...) {
+             with(sqrt(4) * main_effect_contrasts, {
+               data.frame('f1_x_f2' = f1 * f2)
+             })
+           }
+           two_fi_contrasts <- fac.contrasts.int.emmc()
+           rownames(two_fi_contrasts) <- paste("Trt", 1:8)
+           knitr::kable(two_fi_contrasts, caption = 'Desilylation experiment: two-factor interaction contrast coefficients')
+```           
+           
+          **Estimates of the interaction contrasts** can be found by considering the equivalent contrasts in the observed treatment means.
+
+```{r}           
+           t(as.matrix(two_fi_contrasts)) %*% yield
+            emmeans::contrast(desilylation.emm, 'fac.contrasts.int')
+      
+         
+            plotmin <- min(desilylation$yield)
+            plotmax <- max(desilylation$yield)
+            par(cex = 2)
+               
+             
+```
+
+As with main effects, interactions are   displayed graphically using interaction plots, plotting average responses for each pairwise combination of factors, joined by lines as:
+
+
+```{r}     
+              with(desilylation, {
+              interaction.plot(f1, f2, yield, type = "b", pch = 16, legend = F, 
+                               ylim = c(7, 17))
+              legend("bottomright", legend = c("f2 = Low" , "f2 = High "), lty = 2:1, cex = .75)
+                           })
+            
+  
+```
+
+# Q.2 (d)
+Now we can   calculate **all the three factorial effects** as:
+
+```{r}
+               ## hadamard products
+             unscaled_me_contrasts <- 4 * main_effect_contrasts
+             factorial_contrasts <- model.matrix(~.^4, unscaled_me_contrasts)[, -1] / 4
+             
+             ## all factorial effects - directly, as there is no treatment replication
+             t(factorial_contrasts) %*% yield
+             
+ 
+```
+
+
+
+
+```{r}
+           
+             # using emmeans
+             factorial_contrasts.emmc <- function(levs, ...) data.frame(factorial_contrasts)
+             desilylation.effs <- emmeans::contrast(desilylation.emm, 'factorial_contrasts')
+             desilylation.effs
+            
+            
+            
+             
+```
+
+
+The following Table  gives the *ordered factorial effects*, which are then plotted against standard normal quantiles in subsequent Figure.
+
+```{r} 
+             
+             
+             effs <- dplyr::arrange(transform(desilylation.effs)[,1:2], dplyr::desc(estimate))
+             knitr::kable(effs, caption = "Desilylation experiment: sorted estimated factorial effects")
+ 
+```
+
+
+
+
+```{r}
+              qqnorm(effs[ ,2], ylab = "Factorial effects", main = "") # note that qqnorm/qqline/qqplot don't require sorted data
+             qqnorm(effs[ ,2], ylab = "Factorial effects", main = "") # note that qqnorm/qqline/qqplot don't require sorted data
+             qqline(effs[ ,2])
+  
+```
+
+
+It is more usual to use a *half-normal plot* to assess the size of factorial effects, so we plot the sorted absolute values of the estimated effects against the quantiles of a half-normal distribution
+
+```{r}
+              p <- .5 + .5 * (1:16 - .5) /16 # probabilities we will plot against
+             qqplot(x = qnorm(p), y = abs(effs[,2]), ylab = "Absolute factorial effects", 
+                    xlab = "Half-normal quantiles")
+             
+  
+```
+
+
+For our data we can construct the pseudo standard error (PSE) as follows.
+
+```{r}
+           
+             s0 <- 1.5 * median(abs(effs[, 2]))
+             trimmed <- abs(effs[, 2]) < 2.5 * s0
+             pse <- 1.5 * median(abs(effs[trimmed, 2]))
+             pse
+```
+
+From  package unrepx the function eff.test calculates unadjusted p-values (p.value) and simultaneous p-values (simult.pval) adjusted to account for multiple testing. We see that *the main effects are significant* at the experiment-wise *5%* level and, obeying effect heredity, their interaction (the p-value is borderline, and hovers around 0.05 depending on simulation error).
+
+```{r}
+             
+             eff_est <- effs[, 2]
+             names(eff_est) <- effs[, 1]
+             lenth_tests <- unrepx::eff.test(eff_est, method = "Lenth")
+             knitr::kable(lenth_tests, caption = "Desilylation experiment: hypothesis tests using Lenth's method.")
+
+```
+
+
+
+The package *unrepx* also provides the function *hnplot* to display these results graphically by adding a reference line to a half-normal plot. The ME and SME lines in the following plot indicate the absolute size of effects that would be required to reject null hypothesis
+  at an individual or experimentwise significance level, respectively.
+
+
+```{r}
+              
+             unrepx::hnplot(eff_est, method = "Lenth", horiz = F, ID = 2.7, alpha = 0.05)
+             
+              
+```
+
+
+ 
